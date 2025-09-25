@@ -23,12 +23,6 @@ const voices = [
   { id: 'BV562_streaming', name: 'Chí Mai' },
 ];
 
-interface TTSRequest {
-  text: string;
-  voice: string;
-  type: 'text' | 'srt';
-  cookie: string;
-}
 
 interface SRTSubtitle {
   index: number;
@@ -199,18 +193,33 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify reCAPTCHA
-    const recaptchaResponse = await fetch('https://www.google.com/recaptcha/api/siteverify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        secret: process.env.RECAPTCHA_SECRET_KEY || '',
-        response: recaptchaToken,
-      }),
-    });
+    try {
+      if (!process.env.RECAPTCHA_SECRET_KEY) {
+        return NextResponse.json({ error: 'reCAPTCHA configuration missing' }, { status: 500 });
+      }
 
-    const recaptchaData = await recaptchaResponse.json();
-    if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
-      return NextResponse.json({ error: 'Xác minh bot thất bại. Vui lòng thử lại.' }, { status: 400 });
+      const recaptchaBody = new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET_KEY,
+        response: recaptchaToken,
+      });
+
+      const recaptchaResponse = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: recaptchaBody,
+      });
+
+      if (!recaptchaResponse.ok) {
+        throw new Error(`reCAPTCHA verification failed: ${recaptchaResponse.status}`);
+      }
+
+      const recaptchaData = await recaptchaResponse.json();
+      if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
+        return NextResponse.json({ error: 'Xác minh bot thất bại. Vui lòng thử lại.' }, { status: 400 });
+      }
+    } catch (recaptchaError) {
+      console.error('reCAPTCHA verification error:', recaptchaError);
+      return NextResponse.json({ error: 'Lỗi xác minh reCAPTCHA. Vui lòng thử lại.' }, { status: 400 });
     }
 
     // Rate limiting: 5 requests per minute per IP
