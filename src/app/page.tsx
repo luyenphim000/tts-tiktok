@@ -132,7 +132,12 @@ export default function Home() {
       }
 
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch {
+          throw new Error(`Server error (${response.status}): Failed to generate audio. Check console for details.`);
+        }
         throw new Error(errorData.error || 'Failed to generate audio');
       }
 
