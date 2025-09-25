@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 export default function Home() {
   const [inputType, setInputType] = useState<'text' | 'srt'>('text');
@@ -106,6 +107,12 @@ export default function Home() {
       }, 100);
 
       const cookieSubmit = localStorage.getItem('tiktok_cookie');
+      if (!executeRecaptcha) {
+        setIsProcessing(false);
+        setError('reCAPTCHA chưa tải. Vui lòng thử lại.');
+        return;
+      }
+      const recaptchaToken = await executeRecaptcha('submit_tts');
 
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -114,7 +121,8 @@ export default function Home() {
           text: inputText, 
           voice: selectedVoice, 
           type: inputType,
-          cookie: cookieSubmit
+          cookie: cookieSubmit,
+          recaptchaToken
         }),
       });
 
@@ -150,6 +158,8 @@ export default function Home() {
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
+
+  const { executeRecaptcha } = useGoogleReCaptcha();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 py-2 px-4 sm:px-6">
@@ -368,7 +378,7 @@ export default function Home() {
                         theme === 'dark' ? 'bg-blue-600' : 'bg-slate-300'
                       }`}
                     />
-                  </button>hidden
+                  </button>
                 </div>
               </div>
 

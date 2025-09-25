@@ -176,12 +176,54 @@ async function combineAudioFiles(audioPaths: string[], outputPath: string, isSRT
   }
 }
 
+const rateLimitMap = new Map<string, number[]>();
+
+interface TTSRequest {
+  text: string;
+  voice: string;
+  type: 'text' | 'srt';
+  cookie: string;
+  recaptchaToken?: string;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { text, voice, type, cookie }: TTSRequest & { cookie?: string } = await request.json();
+    const { text, voice, type, cookie, recaptchaToken }: TTSRequest = await request.json();
     
     if (!cookie) {
       return NextResponse.json({ error: 'TikTok cookie is required' }, { status: 400 });
+    }
+
+    if (!recaptchaToken) {
+      return NextResponse.json({ error: 'reCAPTCHA token is required' }, { status: 400 });
+    }
+
+    // Verify reCAPTCHA
+    const recaptchaResponse = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET_KEY || '',
+        response: recaptchaToken,
+      }),
+    });
+
+    const recaptchaData = await recaptchaResponse.json();
+    if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
+      return NextResponse.json({ error: 'Xác minh bot thất bại. Vui lòng thử lại.' }, { status: 400 });
+    }
+
+    // Rate limiting: 5 requests per minute per IP
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
+    if (ip !== 'unknown') {
+      const now = Date.now();
+      let timestamps = rateLimitMap.get(ip) || [];
+      timestamps = timestamps.filter(t => now - t < 60000); // 60 seconds window
+      if (timestamps.length >= 5) {
+        return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 });
+      }
+      timestamps.push(now);
+      rateLimitMap.set(ip, timestamps);
     }
 
     if (!text || text.length > 5000) {
