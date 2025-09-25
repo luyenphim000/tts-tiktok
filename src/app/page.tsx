@@ -229,7 +229,7 @@ export default function Home() {
                 placeholder={inputType === 'srt' 
                   ? "Nhập văn bản SRT vào đây...\n1\n00:00:01,000 --> 00:00:05,000\nVăn bản đầu tiên\n\n2\n00:00:06,000 --> 00:00:10,000\nVăn bản thứ hai" 
                   : "Nhập văn bản vào đây..."}
-                className="w-full h-40 p-6 border-2 border-slate-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-blue-500 focus:border-blue-500 resize-none text-slate-700 dark:text-gray-300 text-lg leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 bg-white dark:bg-gray-800"
+                className="w-full h-40 p-6 border-2 border-slate-300 dark:border-gray-600 rounded-xl focus:ring-4 focus:ring-blue-500 focus:border-blue-500 text-slate-700 dark:text-gray-300 text-lg leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 bg-white dark:bg-gray-800"
                 disabled={isProcessing}
               />
               {inputText.length > 4500 && (
