@@ -4,13 +4,10 @@ import qs from 'qs';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
-import { exec } from 'child_process';
 import { tmpdir } from 'os';
 import process from 'process';
 
-const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
-const copyFileAsync = promisify(fs.copyFile);
 
 const TIKTOK_API_URL = 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
 
@@ -125,49 +122,14 @@ async function generateAudioChunk(text: string, voiceId: string, index: number, 
   }
 }
 
-async function padAudioToDuration(inputPath: string, outputPath: string, duration: number): Promise<void> {
-  const durationStr = duration.toFixed(2);
-  const command = `ffmpeg -y -i ${inputPath} -af apad=pad_dur=${durationStr} -t ${durationStr} -ar 22050 -ac 2 -ab 96k -f mp3 ${outputPath}`;
-  
-  await execAsync(command);
-}
 
-async function combineAudioFiles(audioPaths: string[], outputPath: string, isSRT: boolean, subtitles?: SRTSubtitle[]): Promise<void> {
-  if (isSRT && subtitles && subtitles.length > 0) {
-    // For SRT: pad each audio chunk to its subtitle duration, then concatenate
-    const paddedAudioPaths: string[] = [];
-    const tempDir = path.dirname(outputPath);
-
-    for (let i = 0; i < audioPaths.length; i++) {
-      const subtitleDuration = subtitles[i].end - subtitles[i].start;
-      const paddedPath = path.join(tempDir, `padded_${i}.mp3`);
-      await padAudioToDuration(audioPaths[i], paddedPath, subtitleDuration);
-      paddedAudioPaths.push(paddedPath);
-    }
-
-    // Concatenate padded audios sequentially
-    if (paddedAudioPaths.length === 1) {
-      await copyFileAsync(paddedAudioPaths[0], outputPath);
-    } else {
-      const command = `ffmpeg -y -i "concat:${paddedAudioPaths.join('|')}" -acodec copy ${outputPath}`;
-      await execAsync(command);
-    }
-
-    // Clean up padded files
-    paddedAudioPaths.forEach(file => {
-      if (fs.existsSync(file)) {
-        fs.unlinkSync(file);
-      }
-    });
-  } else {
-    // Simple concatenation for plain text
-    if (audioPaths.length === 1) {
-      await copyFileAsync(audioPaths[0], outputPath);
-    } else {
-      const command = `ffmpeg -y -i "concat:${audioPaths.join('|')}" -acodec copy ${outputPath}`;
-      await execAsync(command);
-    }
+async function combineAudioBuffers(audioBuffers: Buffer[], isSRT: boolean): Promise<Buffer> {
+  // Simple concatenation of MP3 buffers (works for sequential playback; no padding for SRT in serverless)
+  // Note: For SRT, silence gaps are not added; audio plays back-to-back
+  if (audioBuffers.length === 0) {
+    throw new Error('No audio buffers to combine');
   }
+  return Buffer.concat(audioBuffers);
 }
 
 const rateLimitMap = new Map<string, number[]>();
@@ -243,14 +205,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid voice selected' }, { status: 400 });
     }
 
-    const tempDir = path.join(tmpdir(), 'tts-temp');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-
-    const sessionDir = path.join(tempDir, Date.now().toString());
-    fs.mkdirSync(sessionDir, { recursive: true });
-
     let chunks: string[];
     let subtitles: SRTSubtitle[] | undefined;
 
@@ -261,19 +215,15 @@ export async function POST(request: NextRequest) {
       chunks = splitTextIntoChunks(text);
     }
 
-    const audioPaths: string[] = [];
-    const baseAudioDir = path.join(sessionDir, 'audio');
-    fs.mkdirSync(baseAudioDir, { recursive: true });
+    const audioBuffers: Buffer[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
       const chunkText = chunks[i].trim();
       if (!chunkText) continue;
 
       const audioContent = await generateAudioChunk(chunkText, voice, i, cookie);
-      const chunkPath = path.join(baseAudioDir, `chunk_${i.toString().padStart(3, '0')}.mp3`);
-      
-      await writeFileAsync(chunkPath, audioContent, 'base64');
-      audioPaths.push(chunkPath);
+      const audioBuffer = Buffer.from(audioContent, 'base64');
+      audioBuffers.push(audioBuffer);
 
       // Rate limiting
       if (i < chunks.length - 1) {
@@ -281,35 +231,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (audioPaths.length === 0) {
+    if (audioBuffers.length === 0) {
       return NextResponse.json({ error: 'No valid text to process' }, { status: 400 });
     }
 
-    const outputPath = path.join(sessionDir, 'output.mp3');
-    
-    await combineAudioFiles(audioPaths, outputPath, type === 'srt', subtitles);
+    const finalAudioBuffer = await combineAudioBuffers(audioBuffers, type === 'srt');
+    const finalBase64 = finalAudioBuffer.toString('base64');
 
-    // Save to public directory
-    const publicOutputsDir = path.join(process.cwd(), 'public', 'tts-outputs');
-    fs.mkdirSync(publicOutputsDir, { recursive: true });
-    const filename = `tts-${Date.now()}.mp3`;
-    const publicPath = path.join(publicOutputsDir, filename);
-    await copyFileAsync(outputPath, publicPath);
-
-    // Limit to 50 files: delete oldest if exceeding limit
-    const files = fs.readdirSync(publicOutputsDir).filter(f => f.endsWith('.mp3'));
-    if (files.length > 50) {
-      const filePaths = files.map(f => path.join(publicOutputsDir, f));
-      filePaths.sort((a, b) => fs.statSync(a).mtime.getTime() - fs.statSync(b).mtime.getTime());
-      const toDelete = filePaths.slice(0, files.length - 50);
-      toDelete.forEach(file => fs.unlinkSync(file));
-    }
-
-    // Clean up temp files
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-
-    // Return the public URL
-    return NextResponse.json({ url: `/tts-outputs/${filename}` });
+    // Return base64 audio directly (serverless compatible)
+    return NextResponse.json({ 
+      audioBase64: finalBase64,
+      mimeType: 'audio/mpeg',
+      note: type === 'srt' ? 'SRT mode: Audio concatenated without silence gaps (serverless limitation)' : undefined
+    });
 
   } catch (error) {
     console.error('TTS Processing Error:', error);

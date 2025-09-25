@@ -142,7 +142,17 @@ export default function Home() {
       }
 
       const data = await response.json();
-      setDownloadUrl(data.url);
+      if (data.audioBase64) {
+        // Create Blob URL from base64
+        const audioBlob = new Blob([Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0))], { type: data.mimeType || 'audio/mpeg' });
+        const blobUrl = URL.createObjectURL(audioBlob);
+        setDownloadUrl(blobUrl);
+
+        // Show note if present (e.g., for SRT)
+        if (data.note) {
+          setError(data.note); // Reuse error display as info/warning
+        }
+      }
       setProgress(100);
       setIsProcessing(false);
 
@@ -275,10 +285,20 @@ export default function Home() {
               </div>
             )}
 
-            {/* Error Message */}
+            {/* Error/Note Message */}
             {error && (
-              <div className="p-6 bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-xl">
-                <p className="text-red-700 dark:text-red-300 text-center text-lg font-medium">{error}</p>
+              <div className={`p-6 rounded-xl border-2 ${
+                error.includes('SRT') || error.includes('serverless') 
+                  ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800' 
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+              }`}>
+                <p className={`text-center text-lg font-medium ${
+                  error.includes('SRT') || error.includes('serverless') 
+                    ? 'text-yellow-700 dark:text-yellow-300' 
+                    : 'text-red-700 dark:text-red-300'
+                }`}>
+                  {error}
+                </p>
               </div>
             )}
 
@@ -329,7 +349,11 @@ export default function Home() {
                 controls
                 src={downloadUrl}
                 className="w-full rounded-lg shadow-md"
-                onEnded={() => console.log('Audio playback finished')}
+                onEnded={() => {
+                  console.log('Audio playback finished');
+                  // Clean up Blob URL
+                  URL.revokeObjectURL(downloadUrl);
+                }}
               >
                 Trình duyệt của bạn không hỗ trợ phát âm thanh.
               </audio>
