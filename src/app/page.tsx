@@ -346,7 +346,7 @@ export default function Home() {
               <h3 className="text-2xl font-bold text-slate-800 dark:text-white mb-4">Cấu hình</h3>
               
               {/* Theme Toggle */}
-              <div className="mb-6">
+              <div className="mb-6 hidden">
                 <label className="block text-lg font-semibold text-slate-700 dark:text-gray-200 mb-3">
                   Chế độ giao diện
                 </label>
@@ -368,7 +368,7 @@ export default function Home() {
                         theme === 'dark' ? 'bg-blue-600' : 'bg-slate-300'
                       }`}
                     />
-                  </button>
+                  </button>hidden
                 </div>
               </div>
 
